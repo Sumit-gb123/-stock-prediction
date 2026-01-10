@@ -1,6 +1,6 @@
 Advanced NIFTY 50 Stock Predictor
 
-Project Overview:
+Project Overview::
 This project is an advanced stock market prediction dashboard for NIFTY 50 companies. It combines historical stock data with real-time news sentiment analysis to provide predictions on whether a stock price is likely to go up, down, or hold. The project uses machine learning (XGBoost) to analyze stock trends, along with moving averages and returns as technical features.
 
 Key Features:
@@ -56,3 +56,4 @@ Model Training: Train XGBoost classifier using features and target (next-day pri
 Prediction: Use latest data to predict price movement and combine with sentiment for recommendation.
 
 Visualization: Display candlestick charts, moving averages, sentiment, and prediction in Streamlit.
+
