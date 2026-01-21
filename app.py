@@ -2,21 +2,59 @@ import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+from sklearn.metrics import accuracy_score, classification_report
+import time  # for spinner/animations
+import joblib  # for pre-trained model
 
 from modules.stock_data import get_stock_data
 from modules.sentiment import get_news_sentiment
 from modules.features import create_features
 from modules.model import train_model
 
-# ---------------- Page Config ----------------
-st.set_page_config(
-    page_title="Advanced NIFTY 50 Stock Predictor",
-    layout="wide"
-)
+# ===================== CUSTOM CSS =====================
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
 
-st.title("📈 Advanced NIFTY 50 Stock Predictor")
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+}
 
-# ---------------- NIFTY 50 Companies ----------------
+.stApp {
+    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+}
+
+.metric-card {
+    background: #111827;
+    border-radius: 14px;
+    padding: 22px;
+    border: 1px solid #374151;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    text-align: center;
+}
+
+.section-divider {
+    margin: 40px 0;
+    border-top: 1px solid #374151;
+}
+
+section[data-testid="stSidebar"] {
+    background: #020617;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ===================== PAGE CONFIG =====================
+st.set_page_config(page_title="MarketPulse AI", layout="wide")
+
+st.markdown("""
+<h1 style='text-align:center;'>📈 MarketPulse AI</h1>
+<p style='text-align:center; color:#9CA3AF; font-size:18px;'>
+Intelligent Market Forecasting, Risk & Sentiment Analytics Platform
+</p>
+""", unsafe_allow_html=True)
+
+# ===================== NIFTY 50 =====================
 nifty50_tickers = {
     "Reliance Industries": "RELIANCE.NS",
     "TCS": "TCS.NS",
@@ -27,178 +65,234 @@ nifty50_tickers = {
     "State Bank of India": "SBIN.NS",
     "Axis Bank": "AXISBANK.NS",
     "IndusInd Bank": "INDUSINDBK.NS",
-
     "ITC": "ITC.NS",
     "Hindustan Unilever": "HINDUNILVR.NS",
     "Nestle India": "NESTLEIND.NS",
-    "Britannia": "BRITANNIA.NS",
-
     "Bharti Airtel": "BHARTIARTL.NS",
-    "Adani Enterprises": "ADANIENT.NS",
-    "Adani Ports": "ADANIPORTS.NS",
-
     "Larsen & Toubro": "LT.NS",
-    "UltraTech Cement": "ULTRACEMCO.NS",
-    "Tata Steel": "TATASTEEL.NS",
-    "JSW Steel": "JSWSTEEL.NS",
-
-    "Maruti Suzuki": "MARUTI.NS",
-    "Mahindra & Mahindra": "M&M.NS",
     "Tata Motors": "TATAMOTORS.NS",
-    "Bajaj Auto": "BAJAJ-AUTO.NS",
-
-    "Power Grid": "POWERGRID.NS",
-    "NTPC": "NTPC.NS",
-    "Coal India": "COALINDIA.NS",
-
-    "Sun Pharma": "SUNPHARMA.NS",
-    "Dr Reddy’s Labs": "DRREDDY.NS",
-    "Cipla": "CIPLA.NS",
-
-    "HCL Technologies": "HCLTECH.NS",
-    "Wipro": "WIPRO.NS",
-    "Tech Mahindra": "TECHM.NS"
+    "Sun Pharma": "SUNPHARMA.NS"
 }
 
-# ---------------- Sidebar ----------------
+# ===================== SIDEBAR =====================
 st.sidebar.header("⚙️ Configuration")
-
-company_name = st.sidebar.selectbox(
-    "Select NIFTY 50 Company",
-    list(nifty50_tickers.keys())
-)
-
+company_name = st.sidebar.selectbox("Select NIFTY 50 Company", list(nifty50_tickers.keys()))
 ticker = nifty50_tickers[company_name]
+days = st.sidebar.slider("Past Days", 100, 1500, 365)
 
-days = st.sidebar.slider(
-    "Past Days to Fetch",
-    min_value=100,
-    max_value=1500,
-    value=365
-)
-
-# ---------------- Fetch Stock Data ----------------
-st.info(f"Fetching stock data for {company_name}...")
+# ===================== FETCH DATA =====================
+st.info(f"Fetching stock data for {company_name} ({ticker})...")
 stock_df = get_stock_data(ticker).tail(days)
-
 if stock_df.empty:
-    st.error("Stock data not available.")
+    st.error(f"Stock data for {company_name} not available.")
     st.stop()
 
 stock_df['Date'] = pd.to_datetime(stock_df['Date'])
-
-# 🔧 FIX: Add Return column to stock_df (needed for metrics)
 stock_df['Return'] = stock_df['Close'].pct_change()
 
-# ---------------- Fetch News Sentiment ----------------
+# ===================== SENTIMENT =====================
 st.info(f"Fetching news sentiment for {company_name}...")
-sentiment_score = get_news_sentiment(company_name)
+try:
+    sentiment_score, negative_news = get_news_sentiment(company_name)
+except Exception as e:
+    st.warning(f"News sentiment unavailable: {e}")
+    sentiment_score = 0.0
+    negative_news = []
 
-# ---------------- Create Features (ML Data) ----------------
+# ===================== FEATURES =====================
 df = create_features(stock_df)
-
 if len(df) < 30:
-    st.error("Not enough historical data to train model.")
+    st.error("Not enough data.")
     st.stop()
 
-# ---------------- Train Model ----------------
-st.info("Training prediction model...")
-model, X_test, y_test = train_model(df)
+# ===================== LOAD PRE-TRAINED MODEL =====================
+with st.spinner("⏳ Loading ML model for prediction..."):
+    time.sleep(1)  # small artificial delay to show spinner
+    try:
+        model = joblib.load('trained_model.pkl')
+        X_test = joblib.load('X_test.pkl')
+        y_test = joblib.load('y_test.pkl')
+    except Exception as e:
+        st.error(f"Failed to load pre-trained model: {e}")
+        st.stop()
+y_pred_test = model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred_test)
+st.success("✅ Model ready!")
 
-# ---------------- Latest Prediction ----------------
-feature_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'MA5', 'MA10', 'Return']
-
-latest_features = df[feature_cols].iloc[-1].values.reshape(1, -1)
-
+# ===================== PREDICTION =====================
+features = ['Open', 'High', 'Low', 'Close', 'Volume', 'MA5', 'MA10', 'Return']
+latest_features = df[features].iloc[-1].values.reshape(1, -1)
 pred = model.predict(latest_features)[0]
 prob = model.predict_proba(latest_features)[0]
 confidence = float(np.max(prob) * 100)
 
-# ---------------- Final Decision Logic ----------------
-if pred == 1 and sentiment_score > 0.05:
+# ===================== RISK / VOLATILITY =====================
+volatility = stock_df['Return'].rolling(20).std().iloc[-1] * 100
+risk = "🟢 Low Risk" if volatility < 1 else "🟡 Medium Risk" if volatility < 2 else "🔴 High Risk"
+
+# ===================== TREND STRENGTH =====================
+ma_diff = abs(df['MA5'].iloc[-1] - df['MA10'].iloc[-1])
+trend = "Weak" if ma_diff < 0.5 else "Moderate" if ma_diff < 1.5 else "Strong"
+
+# ===================== MARKET REGIME =====================
+short_ma = stock_df['Close'].rolling(10).mean().iloc[-1]
+long_ma = stock_df['Close'].rolling(50).mean().iloc[-1]
+if short_ma > long_ma and volatility < 2:
+    regime = "🐂 Bull Market"
+elif short_ma < long_ma and volatility > 2:
+    regime = "🐻 Bear Market"
+else:
+    regime = "⚖️ Sideways Market"
+
+# ===================== FINAL DECISION =====================
+if confidence < 55:
+    recommendation = "⚠️ Low Confidence – Avoid Trading"
+elif pred == 1 and sentiment_score > 0:
     recommendation = "📈 BUY"
-elif pred == 0 and sentiment_score < -0.05:
+elif pred == 0 and sentiment_score < 0:
     recommendation = "📉 SELL"
 else:
     recommendation = "⏸ HOLD"
 
-# ---------------- TOP METRIC CARDS ----------------
-col1, col2, col3, col4 = st.columns(4)
+# ===================== METRIC CARDS =====================
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+c1, c2, c3, c4, c5 = st.columns(5)
+with c1:
+    st.markdown(f"<div class='metric-card'><h3>Stock</h3><h2>{company_name}</h2></div>", unsafe_allow_html=True)
+with c2:
+    st.markdown(f"<div class='metric-card'><h3>Last Close</h3><h2>₹ {round(stock_df['Close'].iloc[-1],2)}</h2></div>", unsafe_allow_html=True)
+with c3:
+    st.markdown(f"<div class='metric-card'><h3>Risk Level</h3><h2>{risk}</h2></div>", unsafe_allow_html=True)
+with c4:
+    st.markdown(f"<div class='metric-card'><h3>Trend</h3><h2>{trend}</h2></div>", unsafe_allow_html=True)
+with c5:
+    st.markdown(f"<div class='metric-card'><h3>Market Regime</h3><h2>{regime}</h2></div>", unsafe_allow_html=True)
 
-col1.metric("Stock", company_name)
-col2.metric("Last Close (₹)", round(stock_df['Close'].iloc[-1], 2))
-col3.metric(
-    "Daily Return (%)",
-    round(stock_df['Return'].iloc[-1] * 100, 2)
-    if not pd.isna(stock_df['Return'].iloc[-1]) else 0.0
-)
-col4.metric("Prediction", "UP ⬆️" if pred == 1 else "DOWN ⬇️")
+# ===================== SENTIMENT DASHBOARD =====================
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+st.subheader("📰 News Sentiment Intelligence")
+s1, s2, s3 = st.columns(3)
 
-# ---------------- Sentiment Analysis ----------------
-st.subheader("📰 News Sentiment Analysis")
-st.metric("Sentiment Score", round(sentiment_score, 3))
+with s1:
+    progress = st.progress(0)
+    animated_score = st.empty()
+    normalized_score = int((sentiment_score + 1) * 50)
+    for i in range(normalized_score + 1):
+        progress.progress(i)
+        animated_score.metric("Sentiment Score", f"{(i/50)-1:.3f}")
+        time.sleep(0.01)
 
-if sentiment_score > 0.1:
-    st.success("Market Sentiment: Strongly Positive 🟢")
-elif sentiment_score > 0:
-    st.info("Market Sentiment: Slightly Positive 🔵")
-elif sentiment_score < -0.1:
-    st.error("Market Sentiment: Strongly Negative 🔴")
-else:
-    st.warning("Market Sentiment: Neutral ⚪")
+with s2:
+    if sentiment_score > 0.15:
+        st.success("Strong Positive 🟢")
+    elif sentiment_score > 0:
+        st.info("Mild Positive 🔵")
+    elif sentiment_score < -0.15:
+        st.error("Strong Negative 🔴")
+    else:
+        st.warning("Neutral ⚪")
 
-# ---------------- Prediction Result ----------------
-st.subheader("📊 Prediction Result")
-st.success(f"Price Direction: {'UP ⬆️' if pred == 1 else 'DOWN ⬇️'}")
-st.success(f"Final Recommendation: {recommendation}")
+with s3:
+    sentiment_impact = "Bullish Bias" if sentiment_score > 0 else "Bearish Bias"
+    st.metric("Market Bias", sentiment_impact)
 
-# ---------------- Model Confidence ----------------
-st.subheader("🎯 Model Confidence")
+if negative_news:
+    with st.expander("🔻 Negative News Impacting Stock"):
+        for news in negative_news[:5]:
+            st.write("•", news)
+
+# ===================== TOMORROW PRICE ESTIMATION =====================
+last_close = stock_df['Close'].iloc[-1]
+short_ma = stock_df['Close'].rolling(5).mean().iloc[-1]
+long_ma = stock_df['Close'].rolling(20).mean().iloc[-1]
+trend_factor = 0.005 if short_ma > long_ma else -0.005 if short_ma < long_ma else 0.0
+vol_factor = stock_df['Return'].rolling(20).std().iloc[-1]
+sent_factor = 0.003 * np.sign(sentiment_score)
+predicted_return = trend_factor + np.random.normal(0, vol_factor) + sent_factor
+predicted_price = last_close * (1 + predicted_return)
+support = stock_df['Low'].rolling(20).min().iloc[-1]
+resistance = stock_df['High'].rolling(20).max().iloc[-1]
+predicted_price = max(support, min(predicted_price, resistance * 1.02))
+
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+st.subheader("🔮 Tomorrow Price Estimation")
+st.metric("Estimated Price", f"₹ {predicted_price:.2f}")
+
+st.markdown(f"""
+**Prediction Logic Explained:**
+
+- **Trend Factor:** {'Bullish' if trend_factor>0 else 'Bearish' if trend_factor<0 else 'Neutral'} ({trend_factor*100:.2f}% change)  
+- **Volatility Factor:** Daily variation based on last 20 days returns ({vol_factor:.3f})  
+- **Sentiment Factor:** {'Positive' if sent_factor>0 else 'Negative' if sent_factor<0 else 'Neutral'} ({sent_factor*100:.2f}% change)  
+- **Support & Resistance:** Price limited between ₹{support:.2f} and ₹{resistance*1.02:.2f}
+""")
+
+# ===================== FINAL SIGNAL =====================
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+st.markdown(f"""
+<div class="metric-card">
+    <h2>📌 Final Trading Signal</h2>
+    <h1>{recommendation}</h1>
+    <p style="color:#9CA3AF;">ML + Sentiment + Risk + Regime Detection</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ===================== MODEL PERFORMANCE =====================
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+st.subheader("🧪 Model Backtesting Performance")
+st.metric("Directional Accuracy", f"{accuracy*100:.2f}%")
+st.text(classification_report(y_test, y_pred_test))
+
+# ===================== CONFIDENCE =====================
+st.subheader("🎯 Prediction Confidence")
 st.progress(int(confidence))
-st.caption(f"Confidence Level: {confidence:.2f}%")
+st.caption(f"Confidence: {confidence:.2f}%")
 
-# ---------------- Plot Stock Chart ----------------
+# ===================== MONTE CARLO SIMULATION =====================
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+st.subheader("📉 Monte Carlo Price Forecast (30 Days)")
+mc_days = 30
+mc_runs = 100
+paths = []
+for _ in range(mc_runs):
+    prices = [last_close]
+    for _ in range(mc_days):
+        prices.append(prices[-1] * (1 + np.random.normal(0, stock_df['Return'].std())))
+    paths.append(prices)
+mc_df = pd.DataFrame(paths).T
+st.line_chart(mc_df)
+
+# ===================== SUPPORT & RESISTANCE =====================
+support = stock_df['Low'].rolling(20).min().iloc[-1]
+resistance = stock_df['High'].rolling(20).max().iloc[-1]
+
+# ===================== CHART =====================
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 fig = go.Figure()
-
 fig.add_trace(go.Candlestick(
     x=stock_df['Date'],
     open=stock_df['Open'],
     high=stock_df['High'],
     low=stock_df['Low'],
-    close=stock_df['Close'],
-    name="Price"
+    close=stock_df['Close']
 ))
-
-fig.add_trace(go.Scatter(
-    x=stock_df['Date'],
-    y=stock_df['Close'].rolling(5).mean(),
-    mode='lines',
-    name='MA 5'
-))
-
-fig.add_trace(go.Scatter(
-    x=stock_df['Date'],
-    y=stock_df['Close'].rolling(10).mean(),
-    mode='lines',
-    name='MA 10'
-))
-
-fig.update_layout(
-    title=f"{company_name} Stock Price with Moving Averages",
-    xaxis_title="Date",
-    yaxis_title="Price (INR)",
-    xaxis_rangeslider_visible=False,
-    template="plotly_dark",
-    height=600
-)
-
+fig.add_trace(go.Scatter(x=stock_df['Date'], y=stock_df['Close'].rolling(5).mean(), name="MA5"))
+fig.add_trace(go.Scatter(x=stock_df['Date'], y=stock_df['Close'].rolling(10).mean(), name="MA10"))
+fig.add_hline(y=support, line_dash="dot", line_color="green",
+              annotation_text="Support", annotation_position="bottom left")
+fig.add_hline(y=resistance, line_dash="dot", line_color="red",
+              annotation_text="Resistance", annotation_position="top left")
+fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False)
 st.plotly_chart(fig, use_container_width=True)
 
-# ---------------- Recent Data ----------------
+# ===================== DATA =====================
 st.subheader("📋 Recent Trading Data")
 st.dataframe(stock_df.tail(10))
 
-# ---------------- Footer ----------------
-st.caption(
-    "⚠️ Educational Project | Uses ML + News Sentiment | Not Financial Advice"
-)
+# ===================== FOOTER =====================
+st.markdown("""
+<p style="text-align:center; color:#9CA3AF; margin-top:40px;">
+⚠️ Educational & Research Purpose Only<br>
+MarketPulse AI does not provide financial advice
+</p>
+""", unsafe_allow_html=True)
