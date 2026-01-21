@@ -2,9 +2,8 @@ import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+import time
 from sklearn.metrics import accuracy_score, classification_report
-import time  # for spinner/animations
-import joblib  # for pre-trained model
 
 from modules.stock_data import get_stock_data
 from modules.sentiment import get_news_sentiment
@@ -15,32 +14,12 @@ from modules.model import train_model
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
-}
-
-.stApp {
-    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
-}
-
-.metric-card {
-    background: #111827;
-    border-radius: 14px;
-    padding: 22px;
-    border: 1px solid #374151;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-    text-align: center;
-}
-
-.section-divider {
-    margin: 40px 0;
-    border-top: 1px solid #374151;
-}
-
-section[data-testid="stSidebar"] {
-    background: #020617;
-}
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+.stApp { background: linear-gradient(135deg, #0f2027, #203a43, #2c5364); }
+.metric-card { background: #111827; border-radius: 14px; padding: 22px; border: 1px solid #374151;
+              box-shadow: 0 8px 24px rgba(0,0,0,0.35); text-align: center; }
+.section-divider { margin: 40px 0; border-top: 1px solid #374151; }
+section[data-testid="stSidebar"] { background: #020617; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -80,8 +59,16 @@ company_name = st.sidebar.selectbox("Select NIFTY 50 Company", list(nifty50_tick
 ticker = nifty50_tickers[company_name]
 days = st.sidebar.slider("Past Days", 100, 1500, 365)
 
+# ===================== LOADING ANIMATION =====================
+loading_placeholder = st.empty()
+with loading_placeholder.container():
+    st.info("Loading dashboard and calculating predictions...")
+    progress_bar = st.progress(0)
+    for i in range(101):
+        progress_bar.progress(i)
+        time.sleep(0.01)  # small animation
+
 # ===================== FETCH DATA =====================
-st.info(f"Fetching stock data for {company_name} ({ticker})...")
 stock_df = get_stock_data(ticker).tail(days)
 if stock_df.empty:
     st.error(f"Stock data for {company_name} not available.")
@@ -91,7 +78,6 @@ stock_df['Date'] = pd.to_datetime(stock_df['Date'])
 stock_df['Return'] = stock_df['Close'].pct_change()
 
 # ===================== SENTIMENT =====================
-st.info(f"Fetching news sentiment for {company_name}...")
 try:
     sentiment_score, negative_news = get_news_sentiment(company_name)
 except Exception as e:
@@ -105,19 +91,10 @@ if len(df) < 30:
     st.error("Not enough data.")
     st.stop()
 
-# ===================== LOAD PRE-TRAINED MODEL =====================
-with st.spinner("⏳ Loading ML model for prediction..."):
-    time.sleep(1)  # small artificial delay to show spinner
-    try:
-        model = joblib.load('trained_model.pkl')
-        X_test = joblib.load('X_test.pkl')
-        y_test = joblib.load('y_test.pkl')
-    except Exception as e:
-        st.error(f"Failed to load pre-trained model: {e}")
-        st.stop()
+# ===================== TRAIN MODEL =====================
+model, X_test, y_test = train_model(df)
 y_pred_test = model.predict(X_test)
 accuracy = accuracy_score(y_test, y_pred_test)
-st.success("✅ Model ready!")
 
 # ===================== PREDICTION =====================
 features = ['Open', 'High', 'Low', 'Close', 'Volume', 'MA5', 'MA10', 'Return']
@@ -137,12 +114,7 @@ trend = "Weak" if ma_diff < 0.5 else "Moderate" if ma_diff < 1.5 else "Strong"
 # ===================== MARKET REGIME =====================
 short_ma = stock_df['Close'].rolling(10).mean().iloc[-1]
 long_ma = stock_df['Close'].rolling(50).mean().iloc[-1]
-if short_ma > long_ma and volatility < 2:
-    regime = "🐂 Bull Market"
-elif short_ma < long_ma and volatility > 2:
-    regime = "🐻 Bear Market"
-else:
-    regime = "⚖️ Sideways Market"
+regime = "🐂 Bull Market" if short_ma > long_ma and volatility < 2 else "🐻 Bear Market" if short_ma < long_ma and volatility > 2 else "⚖️ Sideways Market"
 
 # ===================== FINAL DECISION =====================
 if confidence < 55:
@@ -153,6 +125,9 @@ elif pred == 0 and sentiment_score < 0:
     recommendation = "📉 SELL"
 else:
     recommendation = "⏸ HOLD"
+
+# ===================== CLEAR LOADING PLACEHOLDER =====================
+loading_placeholder.empty()  # removes the animation once calculations are done
 
 # ===================== METRIC CARDS =====================
 st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
@@ -174,14 +149,7 @@ st.subheader("📰 News Sentiment Intelligence")
 s1, s2, s3 = st.columns(3)
 
 with s1:
-    progress = st.progress(0)
-    animated_score = st.empty()
-    normalized_score = int((sentiment_score + 1) * 50)
-    for i in range(normalized_score + 1):
-        progress.progress(i)
-        animated_score.metric("Sentiment Score", f"{(i/50)-1:.3f}")
-        time.sleep(0.01)
-
+    st.metric("Sentiment Score", round(sentiment_score, 3))
 with s2:
     if sentiment_score > 0.15:
         st.success("Strong Positive 🟢")
@@ -191,15 +159,17 @@ with s2:
         st.error("Strong Negative 🔴")
     else:
         st.warning("Neutral ⚪")
-
 with s3:
-    sentiment_impact = "Bullish Bias" if sentiment_score > 0 else "Bearish Bias"
-    st.metric("Market Bias", sentiment_impact)
+    st.metric("Market Bias", "Bullish Bias" if sentiment_score > 0 else "Bearish Bias")
 
 if negative_news:
     with st.expander("🔻 Negative News Impacting Stock"):
         for news in negative_news[:5]:
             st.write("•", news)
+
+# ===================== REST OF YOUR DASHBOARD =====================
+# (You can include charts, Monte Carlo simulation, final signals, etc., just like in your previous full code)
+
 
 # ===================== TOMORROW PRICE ESTIMATION =====================
 last_close = stock_df['Close'].iloc[-1]
